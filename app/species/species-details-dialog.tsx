@@ -13,10 +13,16 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/use-toast";
+import { createBrowserSupabaseClient } from "@/lib/client-utils";
+import type { Database } from "@/lib/schema";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { useState, type BaseSyntheticEvent, type MouseEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+
+
 
 type Species = Database["public"]["Tables"]["species"]["Row"];
 
@@ -49,7 +55,15 @@ const speciesSchema = z.object({
     .transform((val) => (!val || val.trim() === "" ? null : val.trim())),
 });
 
-export default function SpeciesDetailsDialog({ species }: { species: Species }) {
+type FormData = z.infer<typeof speciesSchema>;
+
+// React component for SpeciesDetailDialog
+export default function SpeciesDetailsDialog({ species, currentUser }: { species: Species; currentUser: string }) {
+
+  const router = useRouter();
+
+  const [isEditing, setIsEditing] = useState(false);
+
   const defaultValues: Partial<FormData> = {
     scientific_name: species.scientific_name,
     common_name: species.common_name,
@@ -65,21 +79,48 @@ export default function SpeciesDetailsDialog({ species }: { species: Species }) 
     mode: "onChange",
   });
 
-  const onSubmit = (input: FormData) => {
-    console.log(input);
+  // Event handler for submissions
+  const onSubmit = async (input: FormData) => {
+    // Instantiates supabase client
+    const supabase = createBrowserSupabaseClient();
+
+    // Updates species row in supabase
+    const { error } = await supabase.from("species").update(input).eq("id", species.id);
+
+    // Checks for error
+    if (error) {
+      return toast({
+        title: "Something went wrong.",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+
+    // Switch to non editing mode
+    setIsEditing(false);
+
+    // Cleans and gets new data
+    form.reset(input);
+    router.refresh();
+
+    // Returns confirmation message
+    return toast({
+      title: "Changes saved!",
+      description: "Saved your changes to " + input.scientific_name + ".",
+    });
   };
 
-  const [isEditing, setIsEditing] = useState(false);
-
+  // Event handler for starting to edit form
   const startEditing = (e: MouseEvent) => {
     e.preventDefault();
     setIsEditing(true);
   };
 
+  // Event handler for trying to cancel changes
   const handleCancel = (e: MouseEvent) => {
-    // OK: true
-    // Cancel: false
     e.preventDefault();
+
+    // Creates pop-up to ensure you intentionally are trying to cancel
     if (!window.confirm("Revert all unsaved changes?")) {
       return;
     }
@@ -88,6 +129,33 @@ export default function SpeciesDetailsDialog({ species }: { species: Species }) 
     setIsEditing(false);
   };
 
+  // Event handler for trying to delete a species card
+  const handleDelete = async (input: FormData) => {
+    if (!window.confirm("Are you sure you want to delete this species?")) {
+      return;
+    }
+
+    const supabase = createBrowserSupabaseClient();
+
+    // Deletes the species row from Supabase
+    const { error } = await supabase.from("species").delete().eq("id", species.id);;
+
+    if (error) {
+      return toast({
+        title: "Something went wrong.",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+    router.refresh();
+
+    return toast({
+      title: "Species deleted!",
+      description: "Successfully deleted " + input.scientific_name + ".",
+    });
+  };
+
+  // This is from the dialog in add-species-dialog file
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -98,7 +166,6 @@ export default function SpeciesDetailsDialog({ species }: { species: Species }) 
           <DialogTitle>{species.scientific_name} </DialogTitle>
           {species.common_name && <DialogDescription>{species.common_name}</DialogDescription>}
         </DialogHeader>
-        {/*TODO: Add more here*/}
 
         <Form {...form}>
           <form onSubmit={(e: BaseSyntheticEvent) => void form.handleSubmit(onSubmit)(e)}>
@@ -216,15 +283,7 @@ export default function SpeciesDetailsDialog({ species }: { species: Species }) 
                   );
                 }}
               />
-              <div className="flex">
-                {/* <Button type="submit" className="ml-1 mr-1 flex-auto">
-                  Edit Species
-                </Button>
-                <DialogClose asChild>
-                  <Button type="button" className="ml-1 mr-1 flex-auto" variant="secondary">
-                    Cancel
-                  </Button>
-                </DialogClose>*/}
+              {species.author === currentUser && <div className="flex">
                 {isEditing ? (
                   <>
                     <Button type="submit" className="ml-1 mr-1 flex-auto">
@@ -235,11 +294,16 @@ export default function SpeciesDetailsDialog({ species }: { species: Species }) 
                     </Button>
                   </>
                 ) : (
-                  <Button type="button" className="ml-1 mr-1 flex-auto" onClick={startEditing}>
-                    Edit species
-                  </Button>
+                  <>
+                    <Button type="button" className="ml-1 mr-1 flex-auto" onClick={startEditing}>
+                      Edit species
+                    </Button>
+                    <Button type="button" variant="outlined" color="error" className="ml-1 mr-1 flex-auto"  onClick={() => void handleDelete(form.getValues())}>
+                      Delete
+                    </Button>
+                  </>
                 )}
-              </div>
+              </div>}
             </div>
           </form>
         </Form>
